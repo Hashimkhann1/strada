@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "975763356650",
+    "project_id": "strada-c3a18",
+    "storage_bucket": "strada-c3a18.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:975763356650:android:a8c0c58c2d6f7c9a945093",
+        "android_client_info": {
+          "package_name": "com.strada.strada"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABKTq4UlTLv4zcSZw4PDhzVKR9gPmErvA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

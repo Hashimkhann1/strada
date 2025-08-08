@@ -1,46 +1,73 @@
+// lib/view/pos_screen/pos_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:hive/hive.dart';
+import 'package:shimmer/shimmer.dart';
+import 'package:strada/model/product_model/product_model.dart';
 import 'package:strada/view/auth/signin_screen/signin_screen.dart';
+import 'package:strada/view/pos_screen/cart_widgte/cart_widgte.dart';
+import 'package:strada/view/pos_screen/unsynced/unsynced_sales.dart';
 import 'package:strada/view_model/auth/auth_view_model.dart';
+import 'package:strada/view_model/pos/cart_view_model.dart';
+import 'package:strada/view_model/pos/pos_view_model.dart';
+
 
 class POSScreen extends StatefulWidget {
-
-  const POSScreen({
-    super.key,
-  });
+  const POSScreen({super.key});
 
   @override
   State<POSScreen> createState() => _POSScreenState();
 }
 
 class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
+  // Controllers for UI elements
   final TextEditingController _searchController = TextEditingController();
   late TabController _tabController;
 
-  // Sample data - replace with real data later
-  List<Product> allProducts = [
-    Product(id: '1', name: 'Type C', price: 170, category: 'Mobile Accessories', stock: 50, image: '🔌'),
-    Product(id: '2', name: 'Type A', price: 150, category: 'Mobile Accessories', stock: 30, image: '🔌'),
-    Product(id: '3', name: 'Adapter', price: 500, category: 'Mobile Accessories', stock: 100, image: '🔌'),
-    Product(id: '4', name: 'Hands Free', price: 120, category: 'Mobile Accessories', stock: 75, image: '🎧'),
-    Product(id: '5', name: 'Finger Gloves', price: 30, category: 'Mobile Accessories', stock: 60, image: '🧤'),
-    Product(id: '6', name: 'Caps', price: 320, category: 'Caps', stock: 40, image: '🧢'),
-    Product(id: '7', name: 'Glasses', price: 160, category: 'Glasses', stock: 25, image: '👓'),
-    Product(id: '8', name: 'Masks', price: 20, category: 'other', stock: 20, image: '😷'),
-  ];
+  // ViewModels to manage state and business logic
+  late final PosViewModel _posViewModel;
+  late final CartViewModel _cartViewModel;
 
-  List<CartItem> cartItems = [];
+  // Local UI state
   String searchQuery = '';
   String selectedCategory = 'All';
   bool isOffline = true;
-  int unsyncedCount = 2;
-
-  List<String> categories = ['All', 'Mobile Accessories', 'Caps', 'Others'];
+  int _unsyncedCount = 0;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    loadUnsyncedCount();
+
+    // Initialize the ViewModels. They will handle their own data fetching.
+    _posViewModel = PosViewModel();
+    _cartViewModel = CartViewModel();
+  }
+
+  Future<void> loadUnsyncedCount() async {
+    try {
+      final box = await Hive.openBox('unsynced_sales');
+      final salesToSync = box.values.toList();
+      print(salesToSync);
+      setState(() {
+        _unsyncedCount = salesToSync.length;
+      });
+    } catch (e) {
+      setState(() {
+        _unsyncedCount = 0; // fallback if error
+      });
+      print('Error loading unsynced sales: $e');
+    }
+  }
+
+  /// Refreshes the product list by calling the method in the PosViewModel.
+  Future<void> _refreshProducts() async {
+    await _posViewModel.fetchProducts();
+    if (mounted) {
+      _showSnackBar('Products refreshed', Colors.blue);
+    }
   }
 
   @override
@@ -55,15 +82,27 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
           SystemNavigator.pop();
         }
       },
-      child: Scaffold(
-        backgroundColor: Colors.grey[50],
-        appBar: _buildAppBar(),
-        body: isTablet ? _buildTabletLayout() : _buildMobileLayout(),
+      // ListenableBuilder ensures the screen rebuilds when product data changes.
+      child: ListenableBuilder(
+        listenable: _posViewModel,
+        builder: (context, child) {
+          // A safety check to reset the category filter if it becomes invalid.
+          if (!_posViewModel.categories.contains(selectedCategory)) {
+            selectedCategory = 'All';
+          }
+          return Scaffold(
+            backgroundColor: Colors.grey[50],
+            appBar: _buildAppBar(),
+            body: isTablet ? _buildTabletLayout() : _buildMobileLayout(),
+          );
+        },
       ),
     );
   }
 
   PreferredSizeWidget _buildAppBar() {
+
+
     return AppBar(
       backgroundColor: Colors.white,
       elevation: 2,
@@ -71,23 +110,12 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
       title: Row(
         children: [
           const SizedBox(width: 6),
-          if (isOffline)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orange[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.wifi_off, size: 14, color: Colors.orange[700]),
-                ],
-              ),
-            ),
-          if (unsyncedCount > 0) ...[
-            const SizedBox(width: 8),
-            Container(
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => UnsyncedSales()));
+            },
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: Colors.red[100],
@@ -99,7 +127,7 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
                   Icon(Icons.sync_problem, size: 14, color: Colors.red[700]),
                   const SizedBox(width: 4),
                   Text(
-                    '$unsyncedCount unsynced',
+                    '$_unsyncedCount unsynced',
                     style: TextStyle(
                       fontSize: 10,
                       color: Colors.red[700],
@@ -109,21 +137,15 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
                 ],
               ),
             ),
-          ],
+          ),
         ],
       ),
       actions: [
-        if (unsyncedCount > 0)
-          IconButton(
-            icon: const Icon(Icons.sync, color: Colors.blue),
-            onPressed: _syncData,
-            tooltip: 'Sync Data',
-          ),
-        // IconButton(
-        //   icon: const Icon(Icons.history, color: Colors.blue),
-        //   onPressed: _showTransactionHistory,
-        //   tooltip: 'Transaction History',
-        // ),
+        IconButton(
+          icon: const Icon(Icons.refresh, color: Colors.blue),
+          onPressed: _refreshProducts,
+          tooltip: 'Refresh Products',
+        ),
         IconButton(
           icon: const Icon(Icons.logout, color: Colors.red),
           onPressed: _logout,
@@ -155,7 +177,11 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
               ),
             ],
           ),
-          child: _buildCartSection(),
+          child: CartWidget(
+            viewModel: _cartViewModel,
+            onPaymentSuccess: _onPaymentCompleted,
+            onShowSnackBar: _showSnackBar,
+          ),
         ),
       ],
     );
@@ -168,33 +194,40 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
         children: [
           Container(
             color: Colors.white,
-            child: TabBar(
-              controller: _tabController,
-              labelColor: Colors.blue[700],
-              unselectedLabelColor: Colors.grey[600],
-              indicatorColor: Colors.blue[700],
-              tabs: [
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.inventory),
-                      const SizedBox(width: 8),
-                      const Text('Products'),
-                    ],
-                  ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.shopping_cart),
-                      const SizedBox(width: 8),
-                      Text('Cart (${cartItems.length})'),
-                    ],
-                  ),
-                ),
-              ],
+            // ListenableBuilder updates the cart badge when items are added/removed.
+            child: ListenableBuilder(
+              listenable: _cartViewModel,
+              builder: (context, child) {
+                return TabBar(
+                  controller: _tabController,
+                  labelColor: Colors.blue[700],
+                  unselectedLabelColor: Colors.grey[600],
+                  indicatorColor: Colors.blue[700],
+                  tabs: [
+                    const Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.inventory),
+                          SizedBox(width: 8),
+                          Text('Products'),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.shopping_cart,color: _cartViewModel.items.length > 0 ? Colors.pink : Colors.grey,),
+                          const SizedBox(width: 8),
+                          // The count now comes from the CartViewModel
+                          Text('Cart (${_cartViewModel.items.length})',style: TextStyle(color: _cartViewModel.items.length > 0 ? Colors.pink : Colors.grey,fontSize: _cartViewModel.items.length > 0 ? 18 : 16,),),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
           Expanded(
@@ -202,7 +235,11 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
               controller: _tabController,
               children: [
                 _buildProductsSection(),
-                _buildCartSection(),
+                CartWidget(
+                  viewModel: _cartViewModel,
+                  onPaymentSuccess: _onPaymentCompleted,
+                  onShowSnackBar: _showSnackBar,
+                ),
               ],
             ),
           ),
@@ -221,12 +258,13 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildSearchAndFilters() {
+    // Categories are now fetched from the PosViewModel
+    final categories = _posViewModel.categories;
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          // Search Bar
           Row(
             children: [
               Expanded(
@@ -241,7 +279,8 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
                       hintText: 'Search products...',
                       prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
                       border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     ),
                     onChanged: (value) {
                       setState(() {
@@ -251,23 +290,9 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-              // const SizedBox(width: 12),
-              // Container(
-              //   decoration: BoxDecoration(
-              //     color: Colors.blue,
-              //     borderRadius: BorderRadius.circular(12),
-              //   ),
-              //   child: IconButton(
-              //     icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
-              //     onPressed: _scanBarcode,
-              //     tooltip: 'Scan Barcode',
-              //   ),
-              // ),
             ],
           ),
           const SizedBox(height: 16),
-
-          // Category Filter
           SizedBox(
             height: 40,
             child: ListView.builder(
@@ -276,7 +301,6 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
               itemBuilder: (context, index) {
                 final category = categories[index];
                 final isSelected = selectedCategory == category;
-
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: FilterChip(
@@ -292,7 +316,8 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
                     checkmarkColor: Colors.blue[700],
                     labelStyle: TextStyle(
                       color: isSelected ? Colors.blue[700] : Colors.grey[700],
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight:
+                      isSelected ? FontWeight.w600 : FontWeight.normal,
                     ),
                   ),
                 );
@@ -305,6 +330,29 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildProductGrid() {
+    // Shows the shimmer effect while loading
+    if (_posViewModel.isLoading) {
+      return _buildShimmerGrid();
+    }
+
+    // Shows an error message if fetching fails
+    if (_posViewModel.errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error, size: 64, color: Colors.red[400]),
+            const SizedBox(height: 16),
+            Text('Error loading products', style: TextStyle(fontSize: 18, color: Colors.red[600], fontWeight: FontWeight.w500)),
+            const SizedBox(height: 8),
+            Text(_posViewModel.errorMessage!, style: TextStyle(fontSize: 14, color: Colors.grey[500]), textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: _refreshProducts, child: const Text('Retry')),
+          ],
+        ),
+      );
+    }
+
     final products = _getFilteredProducts();
 
     if (products.isEmpty) {
@@ -314,22 +362,11 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
           children: [
             Icon(Icons.search_off, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            Text(
-              'No products found',
-              style: TextStyle(
-                fontSize: 18,
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            Text('No products found', style: TextStyle(fontSize: 18, color: Colors.grey[600], fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
-            Text(
-              'Try adjusting your search or filters',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[500],
-              ),
-            ),
+            Text('Try adjusting your search or filters', style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: _refreshProducts, child: const Text('Refresh Products')),
           ],
         ),
       );
@@ -337,6 +374,29 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
 
     return Container(
       color: Colors.grey[50],
+      child: RefreshIndicator(
+        onRefresh: _refreshProducts,
+        child: GridView.builder(
+          padding: const EdgeInsets.all(16),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: MediaQuery.of(context).size.width > 600 ? 4 : 2,
+            childAspectRatio: 0.75,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+          ),
+          itemCount: products.length,
+          itemBuilder: (context, index) {
+            return _buildProductCard(products[index]);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShimmerGrid() {
+    return Shimmer.fromColors(
+      baseColor: Colors.grey[300]!,
+      highlightColor: Colors.grey[100]!,
       child: GridView.builder(
         padding: const EdgeInsets.all(16),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -345,10 +405,30 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
         ),
-        itemCount: products.length,
-        itemBuilder: (context, index) {
-          return _buildProductCard(products[index]);
-        },
+        itemCount: 8,
+        itemBuilder: (context, index) => _buildShimmerProductCard(),
+      ),
+    );
+  }
+
+  Widget _buildShimmerProductCard() {
+    return Container(
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(child: Container(width: 60, height: 60, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30)))),
+          const SizedBox(height: 12),
+          Container(height: 20, width: double.infinity, color: Colors.white),
+          const SizedBox(height: 8),
+          Container(height: 20, width: 100, color: Colors.white),
+          const Spacer(),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Container(height: 24, width: 80, color: Colors.white),
+            Container(height: 16, width: 60, color: Colors.white),
+          ]),
+        ],
       ),
     );
   }
@@ -357,615 +437,92 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
     final isOutOfStock = product.stock <= 0;
 
     return GestureDetector(
-      onTap: isOutOfStock ? null : () => _addToCart(product),
+      onTap: isOutOfStock
+          ? null
+          : () {
+        // Call the CartViewModel to add the product
+        _cartViewModel.addToCart(product);
+        HapticFeedback.lightImpact();
+        _showSnackBar('${product.name} added to cart', Colors.green);
+      },
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
         ),
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Product Image/Icon
-                  Center(
-                    child: Container(
-                      width: 60,
-                      height: 60,
-                      decoration: BoxDecoration(
-                        color: isOutOfStock ? Colors.grey[200] : Colors.blue[50],
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      child: Center(
-                        child: Text(
-                          product.image,
-                          style: TextStyle(
-                            fontSize: 30,
-                            color: isOutOfStock ? Colors.grey[400] : null,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Product Name
-                  Text(
-                    product.name,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: isOutOfStock ? Colors.grey[400] : Colors.grey[800],
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-
-                  // Category
-                  Text(
-                    product.category,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                  const Spacer(),
-
-                  // Price and Stock
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '${product.price.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: isOutOfStock ? Colors.grey[400] : Colors.green[700],
-                        ),
-                      ),
-                      Text(
-                        'Stock: ${product.stock}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: product.stock <= 5 ? Colors.red[600] : Colors.grey[600],
-                          fontWeight: product.stock <= 5 ? FontWeight.w600 : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Out of Stock Overlay
-            if (isOutOfStock)
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Center(
-                    child: Text(
-                      'OUT OF STOCK',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-            // Low Stock Indicator
-            if (product.stock <= 5 && product.stock > 0)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.orange,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'LOW',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCartSection() {
-    return Container(
-      color: Colors.white,
-      child: Column(
-        children: [
-          // Cart Header
-          Container(
+        child: Stack(children: [
+          Padding(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-            ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.shopping_cart, color: Colors.blue[700]),
-                const SizedBox(width: 8),
-                Text(
-                  'Current Sale',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[800],
-                  ),
-                ),
+                Center(child: Container(width: 60, height: 60, decoration: BoxDecoration(color: isOutOfStock ? Colors.grey[200] : Colors.blue[50], borderRadius: BorderRadius.circular(30)), child: Center(child: Text(product.image, style: TextStyle(fontSize: 30, color: isOutOfStock ? Colors.grey[400] : null))))),
+                const SizedBox(height: 12),
+                Text(product.name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: isOutOfStock ? Colors.grey[400] : Colors.grey[800]), maxLines: 2, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 4),
+                Text(product.category, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
                 const Spacer(),
-                if (cartItems.isNotEmpty)
-                  TextButton(
-                    onPressed: _clearCart,
-                    child: Text(
-                      'Clear All',
-                      style: TextStyle(color: Colors.red[600]),
-                    ),
-                  ),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('₨${product.price.toStringAsFixed(0)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isOutOfStock ? Colors.grey[400] : Colors.green[700])),
+                  Text('Stock: ${product.stock}', style: TextStyle(fontSize: 12, color: product.stock <= 5 ? Colors.red[600] : Colors.grey[600], fontWeight: product.stock <= 5 ? FontWeight.w600 : FontWeight.normal)),
+                ]),
               ],
             ),
           ),
-
-          // Cart Items
-          Expanded(
-            child: cartItems.isEmpty
-                ? _buildEmptyCart()
-                : ListView.builder(
-              itemCount: cartItems.length,
-              itemBuilder: (context, index) {
-                return _buildCartItem(cartItems[index], index);
-              },
+          if (isOutOfStock)
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(color: Colors.black.withOpacity(0.1), borderRadius: BorderRadius.circular(16)),
+                child: const Center(child: Text('OUT OF STOCK', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12))),
+              ),
             ),
-          ),
-
-          // Cart Total and Actions
-          if (cartItems.isNotEmpty) _buildCartFooter(),
-        ],
+          if (product.stock <= 5 && product.stock > 0)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(8)),
+                child: const Text('LOW', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ),
+        ]),
       ),
     );
   }
 
-  Widget _buildEmptyCart() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.shopping_cart_outlined,
-            size: 80,
-            color: Colors.grey[300],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Cart is empty',
-            style: TextStyle(
-              fontSize: 18,
-              color: Colors.grey[500],
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Add products to start selling',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[400],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCartItem(CartItem item, int index) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.blue[100],
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Center(
-            child: Text(
-              item.product.image,
-              style: const TextStyle(fontSize: 16),
-            ),
-          ),
-        ),
-        title: Text(
-          item.product.name,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text('${item.product.price.toStringAsFixed(2)} each'),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Decrease quantity
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: Colors.red[100],
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(Icons.remove, size: 16, color: Colors.red[700]),
-                onPressed: () => _updateCartItemQuantity(index, item.quantity - 1),
-              ),
-            ),
-
-            // Quantity
-            Container(
-              width: 40,
-              alignment: Alignment.center,
-              child: Text(
-                '${item.quantity}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-
-            // Increase quantity
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: Colors.green[100],
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(Icons.add, size: 16, color: Colors.green[700]),
-                onPressed: () => _updateCartItemQuantity(index, item.quantity + 1),
-              ),
-            ),
-
-            const SizedBox(width: 8),
-
-            // Total price for this item
-            SizedBox(
-              width: 60,
-              child: Text(
-                '${(item.product.price * item.quantity).toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.right,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCartFooter() {
-    final subtotal = _calculateSubtotal();
-    final total = subtotal;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey[200]!)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // Totals
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'TOTAL:',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                '${total.toStringAsFixed(2)}',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.green[700],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Payment Button
-          SizedBox(
-            width: double.infinity,
-            height: 56,
-            child: ElevatedButton(
-              onPressed: _processPayment,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 2,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.payment, size: 24),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'PROCESS PAYMENT',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Helper Methods
+  /// Filters products based on search query and selected category.
   List<Product> _getFilteredProducts() {
-    return allProducts.where((product) {
-      final matchesSearch = searchQuery.isEmpty ||
-          product.name.toLowerCase().contains(searchQuery.toLowerCase());
-      final matchesCategory = selectedCategory == 'All' ||
-          product.category == selectedCategory;
+    return _posViewModel.allProducts.where((product) {
+      final matchesSearch = searchQuery.isEmpty || product.name.toLowerCase().contains(searchQuery.toLowerCase());
+      final matchesCategory = selectedCategory == 'All' || product.category == selectedCategory;
       return matchesSearch && matchesCategory;
     }).toList();
   }
 
-  double _calculateSubtotal() {
-    return cartItems.fold(0.0, (sum, item) => sum + (item.product.price * item.quantity));
-  }
-
-  void _addToCart(Product product) {
-    HapticFeedback.lightImpact();
-
-    if (product.stock <= 0) {
-      _showSnackBar('${product.name} is out of stock', Colors.red);
-      return;
+  /// Handles UI changes after a payment is successfully processed by the ViewModel.
+  void _onPaymentCompleted() {
+    // The ViewModel handles clearing the data. This just handles UI.
+    if (MediaQuery.of(context).size.width <= 600) {
+      _tabController.animateTo(0);
     }
-
-    setState(() {
-      final existingIndex = cartItems.indexWhere((item) => item.product.id == product.id);
-
-      if (existingIndex >= 0) {
-        // Update existing item
-        cartItems[existingIndex] = CartItem(
-          product: product,
-          quantity: cartItems[existingIndex].quantity + 1,
-        );
-      } else {
-        // Add new item
-        cartItems.add(CartItem(product: product, quantity: 1));
-      }
-
-      // Update product stock (for demo purposes)
-      product.stock--;
-
-      // Switch to cart tab on mobile
-      if (MediaQuery.of(context).size.width <= 600) {
-        // _tabController.animateTo(1);
-      }
-    });
-
-    _showSnackBar('${product.name} added to cart', Colors.green);
   }
 
-  void _updateCartItemQuantity(int index, int newQuantity) {
-    setState(() {
-      if (newQuantity <= 0) {
-        // Return stock when removing item
-        cartItems[index].product.stock += cartItems[index].quantity;
-        cartItems.removeAt(index);
-      } else {
-        final oldQuantity = cartItems[index].quantity;
-        final difference = newQuantity - oldQuantity;
-
-        // Update stock
-        cartItems[index].product.stock -= difference;
-
-        // Update quantity
-        cartItems[index] = CartItem(
-          product: cartItems[index].product,
-          quantity: newQuantity,
-        );
-      }
-    });
-  }
-
-  void _clearCart() {
-    setState(() {
-      // Return all stock
-      for (final item in cartItems) {
-        item.product.stock += item.quantity;
-      }
-      cartItems.clear();
-    });
-    _showSnackBar('Cart cleared', Colors.orange);
-  }
-
-  void _scanBarcode() {
-    // Simulate barcode scanning
-    _showSnackBar('Barcode scanner opened (simulation)', Colors.blue);
-  }
-
-  void _processPayment() {
-    showDialog(
-      context: context,
-      builder: (context) => _buildPaymentDialog(),
-    );
-  }
-
-  Widget _buildPaymentDialog() {
-    final total = _calculateSubtotal() * 1.08; // Include tax
-
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text('Process Payment'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Total: ${total.toStringAsFixed(2)}',
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => _completePayment('Card'),
-                  icon: const Icon(Icons.credit_card),
-                  label: const Text('Payment'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-      ],
-    );
-  }
-
-  void _completePayment(String paymentMethod) {
-    Navigator.pop(context); // Close dialog
-
-    // Simulate payment processing
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: Card(
-          child: Padding(
-            padding: EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Processing payment...'),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    // Simulate processing delay
-    Future.delayed(const Duration(seconds: 2), () {
-      Navigator.pop(context); // Close processing dialog
-
-      // Show success
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.green, size: 28),
-              const SizedBox(width: 12),
-              const Text('Payment Successful!'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _clearCart();
-                _tabController.animateTo(0);
-                _showSnackBar('Transaction completed successfully!', Colors.green);
-              },
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    });
-  }
-
-  void _syncData() {
-    _showSnackBar('Syncing data...', Colors.blue);
-    // Simulate sync
-    Future.delayed(const Duration(seconds: 2), () {
-      setState(() {
-        unsyncedCount = 0;
-      });
-      _showSnackBar('Data synced successfully!', Colors.green);
-    });
-  }
-
-  void _showTransactionHistory() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Transaction History'),
-        content: const Text('Transaction history feature will be implemented next.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
+  /// Shows a SnackBar with a given message and color.
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(milliseconds: 1000),
       ),
     );
   }
+
+  // --- Other Methods ---
+
 
   void _logout() {
     showDialog(
@@ -974,17 +531,13 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
         title: const Text('Logout'),
         content: const Text('Are you sure you want to logout?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
             onPressed: () async {
               await AuthViewModel().signOut();
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const SigninScreen()),
-              );
+              if (mounted) {
+                Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const SigninScreen()));
+              }
             },
             child: const Text('Logout'),
           ),
@@ -993,51 +546,12 @@ class _POSScreenState extends State<POSScreen> with TickerProviderStateMixin {
     );
   }
 
-  void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(milliseconds: 1000), // 1.5 seconds
-      ),
-    );
-  }
-
-
   @override
   void dispose() {
     _searchController.dispose();
     _tabController.dispose();
+    _posViewModel.dispose();
+    _cartViewModel.dispose();
     super.dispose();
   }
-}
-
-// Data Models
-class Product {
-  final String id;
-  final String name;
-  final double price;
-  final String category;
-  int stock;
-  final String image;
-
-  Product({
-    required this.id,
-    required this.name,
-    required this.price,
-    required this.category,
-    required this.stock,
-    required this.image,
-  });
-}
-
-class CartItem {
-  final Product product;
-  final int quantity;
-
-  CartItem({
-    required this.product,
-    required this.quantity,
-  });
 }

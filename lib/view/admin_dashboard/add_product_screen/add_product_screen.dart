@@ -1,21 +1,27 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:strada/res/provider/loading_provider/loading_provider.dart';
+import 'package:strada/view_model/admin_view_model/product/product_view_model.dart';
 
-class AddProductScreen extends StatefulWidget {
+class AddProductScreen extends ConsumerStatefulWidget {
   const AddProductScreen({super.key});
 
   @override
-  State<AddProductScreen> createState() => _AddProductScreenState();
+  ConsumerState<AddProductScreen> createState() => _AddProductScreenState();
 }
 
-class _AddProductScreenState extends State<AddProductScreen> {
+class _AddProductScreenState extends ConsumerState<AddProductScreen> {
   final _formKey = GlobalKey<FormState>();
+
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _priceController = TextEditingController();
   final _quantityController = TextEditingController();
   final _skuController = TextEditingController();
   final _productIconController = TextEditingController();
+  final _costPriceController = TextEditingController();
+  final _salePriceController = TextEditingController();
 
   bool _isLoading = false;
   String? _selectedCategory;
@@ -24,10 +30,11 @@ class _AddProductScreenState extends State<AddProductScreen> {
   void dispose() {
     _nameController.dispose();
     _descriptionController.dispose();
-    _priceController.dispose();
     _quantityController.dispose();
     _skuController.dispose();
     _productIconController.dispose();
+    _costPriceController.dispose();
+    _salePriceController.dispose();
     super.dispose();
   }
 
@@ -38,13 +45,13 @@ class _AddProductScreenState extends State<AddProductScreen> {
     return null;
   }
 
-  String? _validatePrice(String? value) {
+  String? _validatePrice(String? value, String fieldName) {
     if (value == null || value.trim().isEmpty) {
-      return 'Price is required';
+      return '$fieldName is required';
     }
     final price = double.tryParse(value);
     if (price == null || price <= 0) {
-      return 'Please enter a valid price';
+      return 'Please enter a valid $fieldName';
     }
     return null;
   }
@@ -60,29 +67,20 @@ class _AddProductScreenState extends State<AddProductScreen> {
     return null;
   }
 
-  Future<void> _saveProduct() async {
+  Future<void> _saveProduct(WidgetRef ref) async {
     if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
-
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 2));
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      // Show success message
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Product added successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pop(context);
-      }
+      ProductViewModel().addProduct(
+        context,
+        ref,
+        _nameController.text,
+        _selectedCategory,
+        _productIconController.text,
+        _skuController.text,
+        int.parse(_quantityController.text),
+        double.parse(_costPriceController.text),
+        double.parse(_salePriceController.text),
+        0,
+      );
     }
   }
 
@@ -104,7 +102,6 @@ class _AddProductScreenState extends State<AddProductScreen> {
             children: [
               const SizedBox(height: 20),
 
-              // Header Section
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -156,73 +153,88 @@ class _AddProductScreenState extends State<AddProductScreen> {
 
               const SizedBox(height: 20),
 
-              // Product Description
-              // TextFormField(
-              //   controller: _descriptionController,
-              //   maxLines: 3,
-              //   decoration: InputDecoration(
-              //     labelText: 'Description *',
-              //     hintText: 'Enter product description',
-              //     prefixIcon: const Icon(Icons.description),
-              //     border: OutlineInputBorder(
-              //       borderRadius: BorderRadius.circular(10),
-              //     ),
-              //     focusedBorder: OutlineInputBorder(
-              //       borderRadius: BorderRadius.circular(10),
-              //       borderSide: const BorderSide(color: Colors.blue, width: 2),
-              //     ),
-              //   ),
-              //   validator: (value) => _validateRequired(value, 'Description'),
-              // ),
+              // Quantity
+              TextFormField(
+                controller: _quantityController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: InputDecoration(
+                  labelText: 'Quantity *',
+                  hintText: '0',
+                  prefixIcon: const Icon(Icons.inventory),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Colors.blue, width: 2),
+                  ),
+                ),
+                validator: _validateQuantity,
+              ),
 
-              // const SizedBox(height: 20),
+              const SizedBox(height: 20),
 
-              // Price and Quantity Row
+              // Cost Price & Sale Price
               Row(
                 children: [
                   Expanded(
                     child: TextFormField(
-                      controller: _priceController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      controller: _costPriceController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'^\d*\.?\d{0,2}'),
+                        ),
                       ],
                       decoration: InputDecoration(
-                        labelText: 'Price *',
+                        labelText: 'Cost Price *',
                         hintText: '0.00',
-                        prefixIcon: const Icon(Icons.attach_money),
+                        prefixIcon: const Icon(Icons.monetization_on),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: Colors.blue, width: 2),
+                          borderSide: const BorderSide(
+                            color: Colors.blue,
+                            width: 2,
+                          ),
                         ),
                       ),
-                      validator: _validatePrice,
+                      validator: (value) => _validatePrice(value, 'Cost Price'),
                     ),
                   ),
                   const SizedBox(width: 15),
                   Expanded(
                     child: TextFormField(
-                      controller: _quantityController,
-                      keyboardType: TextInputType.number,
+                      controller: _salePriceController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'^\d*\.?\d{0,2}'),
+                        ),
                       ],
                       decoration: InputDecoration(
-                        labelText: 'Quantity *',
-                        hintText: '0',
-                        prefixIcon: const Icon(Icons.inventory),
+                        labelText: 'Sale Price *',
+                        hintText: '0.00',
+                        prefixIcon: const Icon(Icons.sell),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: Colors.blue, width: 2),
+                          borderSide: const BorderSide(
+                            color: Colors.blue,
+                            width: 2,
+                          ),
                         ),
                       ),
-                      validator: _validateQuantity,
+                      validator: (value) => _validatePrice(value, 'Sale Price'),
                     ),
                   ),
                 ],
@@ -250,18 +262,9 @@ class _AddProductScreenState extends State<AddProductScreen> {
                     value: 'Mobile Accessories',
                     child: Text('Mobile Accessories'),
                   ),
-                  DropdownMenuItem(
-                    value: 'Caps',
-                    child: Text('Caps'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'Glasses',
-                    child: Text('Glasses'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'Others',
-                    child: Text('Others'),
-                  ),
+                  DropdownMenuItem(value: 'Caps', child: Text('Caps')),
+                  DropdownMenuItem(value: 'Glasses', child: Text('Glasses')),
+                  DropdownMenuItem(value: 'Others', child: Text('Others')),
                 ],
                 onChanged: (String? value) {
                   setState(() {
@@ -278,13 +281,13 @@ class _AddProductScreenState extends State<AddProductScreen> {
 
               const SizedBox(height: 20),
 
-              // SKU (Optional)
+              // Product Icon
               TextFormField(
                 controller: _productIconController,
                 decoration: InputDecoration(
                   labelText: 'Product Icon',
-                  hintText: 'Add Product Icon',
-                  prefixIcon: const Icon(Icons.qr_code),
+                  hintText: 'Add Product Icon (e.g., 🔌)',
+                  prefixIcon: const Icon(Icons.image),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -294,14 +297,16 @@ class _AddProductScreenState extends State<AddProductScreen> {
                   ),
                 ),
               ),
+
               const SizedBox(height: 20),
 
+              // SKU
               TextFormField(
                 controller: _skuController,
                 decoration: InputDecoration(
                   labelText: 'SKU (Optional)',
                   hintText: 'Enter product SKU',
-                  prefixIcon: const Icon(Icons.qr_code),
+                  prefixIcon: const Icon(Icons.qr_code_scanner),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -319,9 +324,8 @@ class _AddProductScreenState extends State<AddProductScreen> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _isLoading ? null : () {
-                        Navigator.pop(context);
-                      },
+                      onPressed:
+                          _isLoading ? null : () => Navigator.pop(context),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 15),
                         side: const BorderSide(color: Colors.grey),
@@ -337,30 +341,41 @@ class _AddProductScreenState extends State<AddProductScreen> {
                   ),
                   const SizedBox(width: 15),
                   Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _saveProduct,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue[600],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                    child: Consumer(builder: (context , ref , child) {
+
+                      final loading = ref.watch(loadingProvider);
+
+                      return ElevatedButton(
+                        onPressed: loading.isLoading ? null : () => _saveProduct(ref),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue[600],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        child:
+                        loading.isLoading
+                            ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
+                          ),
+                        )
+                            : const Text(
+                          'Save Product',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      )
-                          : const Text(
-                        'Save Product',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                    ),
+                      );
+                    }),
                   ),
                 ],
               ),

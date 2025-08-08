@@ -14,6 +14,7 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
   late SaleViewModel _viewModel;
   late AnimationController _shimmerController;
   late Animation<double> _shimmerAnimation;
+  DateTime _selectedDate = DateTime.now();
 
   @override
   void initState() {
@@ -59,35 +60,70 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
     }
   }
 
+  // Helper method to determine if we're on web/desktop
+  bool _isWebOrDesktop(double screenWidth) {
+    return screenWidth > 800;
+  }
+
+  Future<void> _selectDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF6366F1),
+              onPrimary: Colors.white,
+              surface: Colors.white,
+              onSurface: Color(0xFF1E293B),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+      });
+      await _viewModel.fetchSalesForSpecificDate(_selectedDate);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWebOrDesktop = _isWebOrDesktop(screenWidth);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: _buildAppBar(),
+      appBar: _buildAppBar(isWebOrDesktop),
       body: _viewModel.isLoading
-          ? _buildShimmerLoading()
+          ? _buildShimmerLoading(isWebOrDesktop)
           : RefreshIndicator(
-        onRefresh: _viewModel.refresh,
+        onRefresh: () => _viewModel.fetchSalesForSpecificDate(_selectedDate),
         color: const Color(0xFF6366F1),
         backgroundColor: Colors.white,
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(child: _buildSummarySection()),
-            SliverToBoxAdapter(child: _buildDateHeader()),
-            _buildSalesList(),
-          ],
-        ),
+        child: isWebOrDesktop
+            ? _buildWebLayout()
+            : _buildMobileLayout(),
       ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
+  PreferredSizeWidget _buildAppBar(bool isWebOrDesktop) {
+    String title = _isToday(_selectedDate) ? 'Today\'s Sales' : 'Sales';
+
     return AppBar(
-      title: const Text(
-        'Today\'s Sales',
+      title: Text(
+        title,
         style: TextStyle(
           fontWeight: FontWeight.w700,
-          fontSize: 22,
+          fontSize: isWebOrDesktop ? 28 : 22,
           letterSpacing: -0.5,
         ),
       ),
@@ -96,6 +132,7 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
       elevation: 0,
       shadowColor: Colors.black.withOpacity(0.1),
       surfaceTintColor: Colors.transparent,
+      centerTitle: isWebOrDesktop,
       actions: [
         Container(
           margin: const EdgeInsets.only(right: 8),
@@ -106,20 +143,179 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
                 color: const Color(0xFF6366F1).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.refresh_rounded,
-                color: Color(0xFF6366F1),
-                size: 20,
+                color: const Color(0xFF6366F1),
+                size: isWebOrDesktop ? 24 : 20,
               ),
             ),
-            onPressed: () => _viewModel.refresh(),
+            onPressed: () => _viewModel.fetchSalesForSpecificDate(_selectedDate),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSummarySection() {
+  // Mobile Layout (Original)
+  Widget _buildMobileLayout() {
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(child: _buildSummarySection(false)),
+        SliverToBoxAdapter(child: _buildDateHeader(false)),
+        _buildSalesList(false),
+      ],
+    );
+  }
+
+  // Web Layout (Enhanced)
+  Widget _buildWebLayout() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Web Summary Section
+              _buildSummarySection(true),
+              const SizedBox(height: 32),
+
+              // Date Header for Web
+              _buildDateHeader(true),
+              const SizedBox(height: 24),
+
+              // Sales List for Web
+              if (_viewModel.todaySales.isEmpty)
+                SizedBox(
+                  height: 400,
+                  child: _buildEmptyState(true),
+                )
+              else
+                _buildWebSalesList(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummarySection(bool isWeb) {
+    if (isWeb) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Web Header Section
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF6366F1).withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isToday(_selectedDate) ? 'Today\'s Performance' : 'Sales Performance',
+                        style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Track your sales and profit margins',
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.white.withOpacity(0.9),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.analytics_rounded,
+                    size: 56,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Web Summary Cards
+          Row(
+            children: [
+              Expanded(
+                child: _buildWebSummaryCard(
+                  'Total Sales',
+                  'PKR ${NumberFormat('#,###').format(_viewModel.totalSalesToday)}',
+                  Icons.trending_up_rounded,
+                  const LinearGradient(
+                    colors: [Color(0xFF10B981), Color(0xFF059669)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 24),
+              Expanded(
+                child: _buildWebSummaryCard(
+                  'Total Profit',
+                  'PKR ${NumberFormat('#,###').format(_viewModel.totalProfit)}',
+                  Icons.receipt_long_rounded,
+                  const LinearGradient(
+                    colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 24),
+              Expanded(
+                child: _buildWebSummaryCard(
+                  'Transactions',
+                  '${_viewModel.todaySales.length}',
+                  Icons.receipt_rounded,
+                  const LinearGradient(
+                    colors: [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    // Mobile Summary (Original)
     return Container(
       margin: const EdgeInsets.all(16),
       child: Row(
@@ -134,6 +330,7 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
+              false,
             ),
           ),
           const SizedBox(width: 16),
@@ -147,6 +344,7 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
+              false,
             ),
           ),
         ],
@@ -154,17 +352,17 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildSummaryCard(String title, String value, IconData icon, LinearGradient gradient) {
+  Widget _buildSummaryCard(String title, String value, IconData icon, LinearGradient gradient, bool isWeb) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isWeb ? 32 : 20),
       decoration: BoxDecoration(
         gradient: gradient,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(isWeb ? 20 : 16),
         boxShadow: [
           BoxShadow(
             color: gradient.colors.first.withOpacity(0.3),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            blurRadius: isWeb ? 20 : 12,
+            offset: Offset(0, isWeb ? 8 : 4),
           ),
         ],
       ),
@@ -174,20 +372,20 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(isWeb ? 12 : 8),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(isWeb ? 12 : 10),
                 ),
-                child: Icon(icon, color: Colors.white, size: 20),
+                child: Icon(icon, color: Colors.white, size: isWeb ? 28 : 20),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: isWeb ? 16 : 12),
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
-                    fontSize: 14,
+                    fontSize: isWeb ? 18 : 14,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.3,
                   ),
@@ -195,12 +393,12 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: isWeb ? 24 : 16),
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white,
-              fontSize: 24,
+              fontSize: isWeb ? 32 : 24,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.5,
             ),
@@ -210,68 +408,144 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildDateHeader() {
+  Widget _buildWebSummaryCard(String title, String value, IconData icon, LinearGradient gradient) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: gradient.colors.first.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF6366F1).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.calendar_today_rounded,
-              color: Color(0xFF6366F1),
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Text(
-                DateFormat('EEEE').format(DateTime.now()),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.grey[600],
-                  letterSpacing: 0.5,
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
                 ),
+                child: Icon(icon, color: Colors.white, size: 28),
               ),
-              Text(
-                DateFormat('MMMM d, yyyy').format(DateTime.now()),
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1E293B),
-                  letterSpacing: -0.3,
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  ),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 24),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSalesList() {
+  Widget _buildDateHeader(bool isWeb) {
+    return GestureDetector(
+      onTap: _selectDate,
+      child: Container(
+        margin: isWeb ? EdgeInsets.zero : const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        padding: EdgeInsets.symmetric(
+          horizontal: isWeb ? 32 : 20,
+          vertical: isWeb ? 24 : 16,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(isWeb ? 20 : 16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: isWeb ? 12 : 8,
+              offset: Offset(0, isWeb ? 4 : 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(isWeb ? 16 : 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF6366F1).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(isWeb ? 16 : 12),
+              ),
+              child: Icon(
+                Icons.calendar_today_rounded,
+                color: const Color(0xFF6366F1),
+                size: isWeb ? 28 : 20,
+              ),
+            ),
+            SizedBox(width: isWeb ? 24 : 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    DateFormat('EEEE').format(_selectedDate),
+                    style: TextStyle(
+                      fontSize: isWeb ? 16 : 12,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[600],
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  Text(
+                    DateFormat('MMMM d, yyyy').format(_selectedDate),
+                    style: TextStyle(
+                      fontSize: isWeb ? 24 : 16,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF1E293B),
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: EdgeInsets.all(isWeb ? 12 : 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF6366F1).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(isWeb ? 12 : 8),
+              ),
+              child: Icon(
+                Icons.expand_more_rounded,
+                color: const Color(0xFF6366F1),
+                size: isWeb ? 20 : 16,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSalesList(bool isWeb) {
     if (_viewModel.todaySales.isEmpty) {
-      return SliverFillRemaining(child: _buildEmptyState());
+      return SliverFillRemaining(child: _buildEmptyState(false));
     }
 
     return SliverList(
@@ -284,7 +558,7 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
               16,
               index == _viewModel.todaySales.length - 1 ? 16 : 0,
             ),
-            child: _buildSaleCard(_viewModel.todaySales[index]),
+            child: _buildSaleCard(_viewModel.todaySales[index], false),
           );
         },
         childCount: _viewModel.todaySales.length,
@@ -292,7 +566,52 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildSaleCard(DocumentSnapshot sale) {
+  Widget _buildWebSalesList() {
+    // Create rows with 2 cards each
+    List<Widget> rows = [];
+    for (int i = 0; i < _viewModel.todaySales.length; i += 2) {
+      List<Widget> rowCards = [];
+
+      // First card in the row
+      rowCards.add(
+        Expanded(
+          child: _buildSaleCard(_viewModel.todaySales[i], true),
+        ),
+      );
+
+      // Second card in the row (if it exists)
+      if (i + 1 < _viewModel.todaySales.length) {
+        rowCards.add(const SizedBox(width: 24));
+        rowCards.add(
+          Expanded(
+            child: _buildSaleCard(_viewModel.todaySales[i + 1], true),
+          ),
+        );
+      } else {
+        // If odd number of cards, add spacer
+        rowCards.add(const SizedBox(width: 24));
+        rowCards.add(const Expanded(child: SizedBox()));
+      }
+
+      rows.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start, // This is key - align cards to top
+          children: rowCards,
+        ),
+      );
+
+      // Add spacing between rows (except for the last row)
+      if (i + 2 < _viewModel.todaySales.length) {
+        rows.add(const SizedBox(height: 24));
+      }
+    }
+
+    return Column(
+      children: rows,
+    );
+  }
+
+  Widget _buildSaleCard(DocumentSnapshot sale, bool isWeb) {
     Map<String, dynamic> data = sale.data() as Map<String, dynamic>;
     List<dynamic> items = data['items'] ?? [];
     Timestamp createdAt = data['createdAt'];
@@ -302,18 +621,18 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(isWeb ? 20 : 16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            blurRadius: isWeb ? 12 : 8,
+            offset: Offset(0, isWeb ? 4 : 2),
           ),
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(isWeb ? 28 : 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -324,23 +643,23 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: EdgeInsets.all(isWeb ? 12 : 8),
                       decoration: BoxDecoration(
                         color: _getPaymentColor(paymentMethod).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(isWeb ? 12 : 10),
                       ),
                       child: Icon(
                         _getPaymentIcon(paymentMethod),
                         color: _getPaymentColor(paymentMethod),
-                        size: 18,
+                        size: isWeb ? 24 : 18,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    SizedBox(width: isWeb ? 16 : 12),
                     Text(
                       paymentMethod,
                       style: TextStyle(
                         color: _getPaymentColor(paymentMethod),
-                        fontSize: 14,
+                        fontSize: isWeb ? 16 : 14,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.2,
                       ),
@@ -348,16 +667,19 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isWeb ? 16 : 12,
+                    vertical: isWeb ? 8 : 6,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF64748B).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     DateFormat('h:mm a').format(createdAt.toDate()),
-                    style: const TextStyle(
-                      color: Color(0xFF64748B),
-                      fontSize: 12,
+                    style: TextStyle(
+                      color: const Color(0xFF64748B),
+                      fontSize: isWeb ? 14 : 12,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.3,
                     ),
@@ -366,20 +688,20 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
               ],
             ),
 
-            const SizedBox(height: 16),
+            SizedBox(height: isWeb ? 20 : 16),
 
             // Items List
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(isWeb ? 20 : 16),
               decoration: BoxDecoration(
                 color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(isWeb ? 16 : 12),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
               child: Column(
-                children: items.map<Widget>((item) => Padding(
+                children: items.take(isWeb ? 3 : items.length).map<Widget>((item) => Padding(
                   padding: EdgeInsets.only(
-                    bottom: items.indexOf(item) == items.length - 1 ? 0 : 12,
+                    bottom: items.indexOf(item) == (isWeb ? 2 : items.length - 1) ? 0 : 12,
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -388,23 +710,24 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
                         child: Row(
                           children: [
                             Container(
-                              width: 6,
-                              height: 6,
+                              width: isWeb ? 8 : 6,
+                              height: isWeb ? 8 : 6,
                               decoration: const BoxDecoration(
                                 color: Color(0xFF6366F1),
                                 shape: BoxShape.circle,
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            SizedBox(width: isWeb ? 16 : 12),
                             Expanded(
                               child: Text(
                                 '${item['quantity']}x ${item['productName']}',
-                                style: const TextStyle(
-                                  fontSize: 14,
+                                style: TextStyle(
+                                  fontSize: isWeb ? 16 : 14,
                                   fontWeight: FontWeight.w600,
-                                  color: Color(0xFF1E293B),
+                                  color: const Color(0xFF1E293B),
                                   letterSpacing: -0.1,
                                 ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
@@ -412,10 +735,10 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
                       ),
                       Text(
                         'PKR ${NumberFormat('#,###').format(item['pricePerItem'] * item['quantity'])}',
-                        style: const TextStyle(
-                          fontSize: 14,
+                        style: TextStyle(
+                          fontSize: isWeb ? 16 : 14,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF475569),
+                          color: const Color(0xFF475569),
                           letterSpacing: -0.1,
                         ),
                       ),
@@ -425,26 +748,39 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
               ),
             ),
 
-            const SizedBox(height: 16),
+            if (isWeb && items.length > 3)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '+${items.length - 3} more items',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+
+            SizedBox(height: isWeb ? 20 : 16),
 
             // Total Row
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(isWeb ? 20 : 16),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   colors: [Color(0xFF10B981), Color(0xFF059669)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(isWeb ? 16 : 12),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Total Amount',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: isWeb ? 18 : 16,
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
                       letterSpacing: 0.2,
@@ -452,8 +788,8 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
                   ),
                   Text(
                     'PKR ${NumberFormat('#,###').format(totalAmount)}',
-                    style: const TextStyle(
-                      fontSize: 20,
+                    style: TextStyle(
+                      fontSize: isWeb ? 24 : 20,
                       fontWeight: FontWeight.w800,
                       color: Colors.white,
                       letterSpacing: -0.3,
@@ -468,58 +804,68 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(bool isWeb) {
+    String dateText = _isToday(_selectedDate)
+        ? 'No sales today'
+        : 'No sales found';
+    String subtitleText = _isToday(_selectedDate)
+        ? 'Sales will appear here once\ntransactions are made'
+        : 'No transactions were made\non ${DateFormat('MMM d, yyyy').format(_selectedDate)}';
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.all(isWeb ? 32 : 24),
             decoration: BoxDecoration(
               color: const Color(0xFF6366F1).withOpacity(0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.receipt_long_rounded,
-              size: 48,
+              size: isWeb ? 64 : 48,
               color: const Color(0xFF6366F1).withOpacity(0.7),
             ),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            'No sales today',
+          SizedBox(height: isWeb ? 32 : 24),
+          Text(
+            dateText,
             style: TextStyle(
-              fontSize: 22,
-              color: Color(0xFF1E293B),
+              fontSize: isWeb ? 28 : 22,
+              color: const Color(0xFF1E293B),
               fontWeight: FontWeight.w700,
               letterSpacing: -0.5,
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Sales will appear here once\ntransactions are made',
+          SizedBox(height: isWeb ? 12 : 8),
+          Text(
+            subtitleText,
             style: TextStyle(
-              fontSize: 16,
-              color: Color(0xFF64748B),
+              fontSize: isWeb ? 18 : 16,
+              color: const Color(0xFF64748B),
               fontWeight: FontWeight.w500,
               height: 1.4,
               letterSpacing: 0.1,
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 32),
+          SizedBox(height: isWeb ? 40 : 32),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            padding: EdgeInsets.symmetric(
+              horizontal: isWeb ? 32 : 24,
+              vertical: isWeb ? 16 : 12,
+            ),
             decoration: BoxDecoration(
               color: const Color(0xFF6366F1).withOpacity(0.1),
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.2)),
             ),
-            child: const Text(
+            child: Text(
               'Pull to refresh',
               style: TextStyle(
-                fontSize: 14,
-                color: Color(0xFF6366F1),
+                fontSize: isWeb ? 16 : 14,
+                color: const Color(0xFF6366F1),
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.3,
               ),
@@ -530,10 +876,82 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildShimmerLoading() {
+  Widget _buildShimmerLoading(bool isWeb) {
     return AnimatedBuilder(
       animation: _shimmerAnimation,
       builder: (context, child) {
+        if (isWeb) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1200),
+                child: Column(
+                  children: [
+                    // Web Shimmer Header
+                    Container(
+                      height: 200,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.grey[300]!,
+                            Colors.grey[100]!,
+                            Colors.grey[300]!,
+                          ],
+                          begin: Alignment(_shimmerAnimation.value - 1, 0),
+                          end: Alignment(_shimmerAnimation.value, 0),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+
+                    // Web Shimmer Summary Cards
+                    Row(
+                      children: [
+                        Expanded(child: _buildWebShimmerCard()),
+                        const SizedBox(width: 24),
+                        Expanded(child: _buildWebShimmerCard()),
+                        const SizedBox(width: 24),
+                        Expanded(child: _buildWebShimmerCard()),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+
+                    // Web Shimmer Date Header
+                    _buildWebShimmerDateHeader(),
+                    const SizedBox(height: 24),
+
+                    // Web Shimmer Sale Cards
+                    Column(
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: _buildWebShimmerSaleCard()),
+                            const SizedBox(width: 24),
+                            Expanded(child: _buildWebShimmerSaleCard()),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: _buildWebShimmerSaleCard()),
+                            const SizedBox(width: 24),
+                            Expanded(child: _buildWebShimmerSaleCard()),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        // Mobile Shimmer (Original)
         return SingleChildScrollView(
           child: Column(
             children: [
@@ -585,11 +1003,47 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildWebShimmerCard() {
+    return Container(
+      height: 160,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: [
+            Colors.grey[300]!,
+            Colors.grey[100]!,
+            Colors.grey[300]!,
+          ],
+          begin: Alignment(_shimmerAnimation.value - 1, 0),
+          end: Alignment(_shimmerAnimation.value, 0),
+        ),
+      ),
+    );
+  }
+
   Widget _buildShimmerDateHeader() {
     return Container(
       height: 80,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          colors: [
+            Colors.grey[300]!,
+            Colors.grey[100]!,
+            Colors.grey[300]!,
+          ],
+          begin: Alignment(_shimmerAnimation.value - 1, 0),
+          end: Alignment(_shimmerAnimation.value, 0),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebShimmerDateHeader() {
+    return Container(
+      height: 100,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
         gradient: LinearGradient(
           colors: [
             Colors.grey[300]!,
@@ -609,6 +1063,23 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          colors: [
+            Colors.grey[300]!,
+            Colors.grey[100]!,
+            Colors.grey[300]!,
+          ],
+          begin: Alignment(_shimmerAnimation.value - 1, 0),
+          end: Alignment(_shimmerAnimation.value, 0),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebShimmerSaleCard() {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
         gradient: LinearGradient(
           colors: [
             Colors.grey[300]!,
@@ -646,5 +1117,10 @@ class _SaleViewState extends State<SaleView> with TickerProviderStateMixin {
       default:
         return const Color(0xFF6366F1);
     }
+  }
+
+  bool _isToday(DateTime date) {
+    final now = DateTime.now();
+    return date.year == now.year && date.month == now.month && date.day == now.day;
   }
 }

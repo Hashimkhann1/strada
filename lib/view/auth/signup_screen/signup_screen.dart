@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:strada/view/initial/initial_screen.dart';
-import 'package:strada/view/pos_screen/pos_screen.dart';
 import 'package:strada/view_model/auth/auth_view_model.dart';
 
 class SignupScreen extends StatefulWidget {
